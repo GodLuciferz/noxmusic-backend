@@ -1,5 +1,4 @@
 import os
-import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response, Request
 from fastapi.responses import StreamingResponse
@@ -11,16 +10,16 @@ load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+STRING_SESSION = os.getenv("STRING_SESSION")
 CHANNEL = os.getenv("CHANNEL")
 
 app = FastAPI()
 
-client = TelegramClient(StringSession(), API_ID, API_HASH)
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 @app.on_event("startup")
 async def startup():
-    await client.start(bot_token=BOT_TOKEN)
+    await client.connect()
     print("Telethon connected!")
 
 @app.on_event("shutdown")
@@ -40,16 +39,16 @@ async def get_songs():
                 continue
             if not isinstance(message.media, MessageMediaDocument):
                 continue
-            
+
             doc = message.media.document
             mime = doc.mime_type or ""
-            
+
             if "audio" not in mime:
                 continue
 
             title = f"Track {message.id}"
             duration = 0
-            
+
             for attr in doc.attributes:
                 if isinstance(attr, DocumentAttributeAudio):
                     duration = attr.duration or 0
@@ -64,9 +63,10 @@ async def get_songs():
                 "thumb": f"/thumb/{message.id}",
                 "stream": f"/stream/{message.id}"
             })
+
     except Exception as e:
         return {"error": str(e)}
-    
+
     return songs
 
 @app.get("/thumb/{message_id}")
@@ -75,13 +75,13 @@ async def get_thumb(message_id: int):
         message = await client.get_messages(CHANNEL, ids=message_id)
         if not message or not message.media:
             return Response(status_code=404)
-        
+
         thumb_bytes = await client.download_media(
             message.media,
             bytes,
             thumb=-1
         )
-        
+
         if thumb_bytes:
             return Response(
                 content=thumb_bytes,
@@ -89,7 +89,7 @@ async def get_thumb(message_id: int):
             )
     except Exception as e:
         print(f"Thumb error: {e}")
-    
+
     return Response(status_code=404)
 
 @app.get("/stream/{message_id}")
@@ -103,7 +103,7 @@ async def stream_audio(message_id: int, request: Request):
         file_size = doc.size
 
         range_header = request.headers.get("Range")
-        
+
         if range_header:
             start, end = 0, file_size - 1
             range_val = range_header.replace("bytes=", "")
@@ -111,9 +111,9 @@ async def stream_audio(message_id: int, request: Request):
             start = int(parts[0])
             if parts[1]:
                 end = int(parts[1])
-            
+
             chunk_size = end - start + 1
-            
+
             async def generator():
                 async for chunk in client.iter_download(
                     message.media,
@@ -133,7 +133,7 @@ async def stream_audio(message_id: int, request: Request):
                     "Content-Length": str(chunk_size),
                 }
             )
-        
+
         async def full_generator():
             async for chunk in client.iter_download(
                 message.media,
@@ -149,7 +149,7 @@ async def stream_audio(message_id: int, request: Request):
                 "Content-Length": str(file_size),
             }
         )
-        
+
     except Exception as e:
         print(f"Stream error: {e}")
         return Response(status_code=500)
